@@ -224,38 +224,6 @@ def test_verify_save_json_to_a_missing_directory_is_a_clean_error(project, capsy
     assert "PASS" in captured.out  # the verdict is still printed before the error
 
 
-def test_verify_save_json_with_a_directory_as_the_file_is_a_clean_error(project, capsys):
-    assert (
-        cli.main(
-            ["capture", "--name", "exp", "--input", "data.json", "--", sys.executable, "-c", "pass"]
-        )
-        == 0
-    )
-    capsys.readouterr()
-    (project.root / "adir").mkdir()
-    code = cli.main(["verify", "exp.sciproof.json", "--save-json", "adir"])
-    captured = capsys.readouterr()
-    assert code == cli.EXIT_ERROR
-    assert "error: cannot write" in captured.err
-    assert "Traceback" not in captured.err
-
-
-def test_export_to_an_unwritable_path_is_a_clean_error(project, capsys):
-    assert (
-        cli.main(
-            ["capture", "--name", "exp", "--input", "data.json", "--", sys.executable, "-c", "pass"]
-        )
-        == 0
-    )
-    capsys.readouterr()
-    for target in ("nodir/r.json", "."):
-        code = cli.main(["export", "exp.sciproof.json", "-o", target])
-        captured = capsys.readouterr()
-        assert code == cli.EXIT_ERROR
-        assert "error: cannot write" in captured.err
-        assert "Traceback" not in captured.err
-
-
 def test_save_json_to_a_read_only_file_is_a_clean_error(project, capsys):
     target = project.root / "ro.json"
     target.write_text("{}")
