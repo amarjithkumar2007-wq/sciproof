@@ -149,7 +149,12 @@ def _check_hardware(hardware: Any, minor: int) -> None:
     if minor < 1:
         raise _fail(where, "hardware needs schema_version 1.1 or later")
     hardware = _as_dict(hardware, where)
-    cpus = hardware.get("cpu_count")
+    # The key must be present, like the other hardware fields: readers
+    # (inspect, diff, verify) index it directly, and hardware_info() always
+    # writes it. The value may still be null (os.cpu_count() can return None).
+    if "cpu_count" not in hardware:
+        raise _fail(f"{where}.cpu_count", "expected a positive integer or null")
+    cpus = hardware["cpu_count"]
     if cpus is not None and (isinstance(cpus, bool) or not isinstance(cpus, int) or cpus < 1):
         raise _fail(f"{where}.cpu_count", "expected a positive integer or null")
     processor = hardware.get("processor")
@@ -373,6 +378,8 @@ def load_manifest(path: Path) -> dict[str, Any]:
         data = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicate_keys)
     except UnicodeDecodeError as exc:
         raise ManifestError(f"manifest is not valid UTF-8: {exc}") from exc
+    except OSError as exc:
+        raise ManifestError(f"cannot read manifest {path}: {exc}") from exc
     except (ValueError, RecursionError) as exc:  # includes JSONDecodeError and duplicate keys
         raise ManifestError(f"manifest is not valid JSON: {exc}") from exc
     return validate_manifest(data)

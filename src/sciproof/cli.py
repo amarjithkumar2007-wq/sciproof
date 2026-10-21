@@ -47,6 +47,13 @@ EXIT_FAIL = 1
 EXIT_INCONCLUSIVE = 2
 EXIT_ERROR = 3
 
+
+class _ArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        self.print_usage(sys.stderr)
+        self.exit(EXIT_ERROR, f"{self.prog}: error: {message}\n")
+
+
 _STATUS_EXIT = {
     Status.PASS: EXIT_OK,
     Status.FAIL: EXIT_FAIL,
@@ -55,7 +62,7 @@ _STATUS_EXIT = {
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _ArgumentParser(
         prog="sciproof",
         description="Record computational experiments and create verifiable evidence for them.",
     )
