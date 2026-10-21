@@ -444,13 +444,22 @@ def _run_list(args: argparse.Namespace) -> int:
     )
 
 
+def _write_user_file(path: Path, text: str) -> None:
+    """Write a file the user named; an unwritable path is an error (exit 3), not a traceback."""
+    try:
+        path.write_text(text, encoding="utf-8", newline="\n")
+    except OSError as exc:
+        reason = exc.strerror or type(exc).__name__
+        raise SciProofError(f"cannot write {path}: {reason}") from exc
+
+
 def _run_export(args: argparse.Namespace) -> int:
     printer = format_openlineage if args.format == "openlineage" else format_in_toto
     text = printer(args.manifest)
     if args.output is None:
         print(text, end="")
         return EXIT_OK
-    args.output.write_text(text, encoding="utf-8", newline="\n")
+    _write_user_file(args.output, text)
     print(f"Wrote {args.output}")
     return EXIT_OK
 
@@ -520,8 +529,6 @@ def _run_verify(args: argparse.Namespace) -> int:
         allowed_signers=args.allowed_signers,
         policy=args.policy,
     )
-    if args.save_json is not None:
-        args.save_json.write_text(format_report_json(report) + "\n", encoding="utf-8", newline="\n")
     if output_format == "json":
         print(format_report_json(report))
     elif output_format == "markdown":
@@ -530,6 +537,8 @@ def _run_verify(args: argparse.Namespace) -> int:
         print(report_junit(report), end="")
     else:
         print(format_report(report))
+    if args.save_json is not None:  # after the verdict is printed, so a bad path never hides it
+        _write_user_file(args.save_json, format_report_json(report) + "\n")
     return _STATUS_EXIT[report.status]
 
 
