@@ -11,6 +11,7 @@ import json
 import math
 import os
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -149,7 +150,12 @@ def _check_hardware(hardware: Any, minor: int) -> None:
     if minor < 1:
         raise _fail(where, "hardware needs schema_version 1.1 or later")
     hardware = _as_dict(hardware, where)
-    cpus = hardware.get("cpu_count")
+    # The key must be present, like the other hardware fields: readers
+    # (inspect, diff, verify) index it directly, and hardware_info() always
+    # writes it. The value may still be null (os.cpu_count() can return None).
+    if "cpu_count" not in hardware:
+        raise _fail(f"{where}.cpu_count", "expected a positive integer or null")
+    cpus = hardware["cpu_count"]
     if cpus is not None and (isinstance(cpus, bool) or not isinstance(cpus, int) or cpus < 1):
         raise _fail(f"{where}.cpu_count", "expected a positive integer or null")
     processor = hardware.get("processor")
@@ -176,6 +182,12 @@ def _check_hardware(hardware: Any, minor: int) -> None:
 
 
 def _finite_number(value: Any) -> bool:
+    # A Python int is exact and always finite, but math.isfinite() converts to
+    # float and raises OverflowError beyond ~1.8e308 (#88). The == and ordering
+    # operators compare such ints exactly, so a claim value this large is a
+    # valid number, not an error.
+    if isinstance(value, int) and not isinstance(value, bool):
+        return True
     return is_number(value) and math.isfinite(value)
 
 
@@ -236,6 +248,17 @@ def check_nesting(declared: list[tuple[str, str]]) -> None:
 def _finite_nonneg(value: Any, where: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise _fail(where, "expected a number")
+    if isinstance(value, int):
+        # Exact ints never fail math.isfinite(), but returning them as float
+        # can overflow; a manifest is untrusted input, so report a value that
+        # no float can carry as invalid instead of crashing every command
+        # that loads it (#88).
+        if value < 0:
+            raise _fail(where, "expected a finite number >= 0")
+        try:
+            return float(value)
+        except OverflowError:
+            raise _fail(where, "expected a finite number >= 0") from None
     if not math.isfinite(value) or value < 0:
         raise _fail(where, "expected a finite number >= 0")
     return float(value)
@@ -269,7 +292,13 @@ def validate_manifest(data: Any) -> dict[str, Any]:
     name = _get(manifest, "name", str, "manifest")
     if not NAME_RE.fullmatch(name):
         raise _fail("name", f"{name!r} is not a valid experiment name")
-    _get(manifest, "created_at", str, "manifest")
+    created_at = _get(manifest, "created_at", str, "manifest")
+    try:
+        parsed_created_at = datetime.fromisoformat(created_at)
+    except ValueError:
+        raise _fail("manifest.created_at", f"not an ISO 8601 timestamp: {created_at!r}") from None
+    if parsed_created_at.tzinfo is None:
+        raise _fail("manifest.created_at", f"missing a timezone offset: {created_at!r}")
 
     command = _as_dict(_get(manifest, "command", dict, "manifest"), "command")
     argv = _get(command, "argv", list, "command")
@@ -373,6 +402,8 @@ def load_manifest(path: Path) -> dict[str, Any]:
         data = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicate_keys)
     except UnicodeDecodeError as exc:
         raise ManifestError(f"manifest is not valid UTF-8: {exc}") from exc
+    except OSError as exc:
+        raise ManifestError(f"cannot read manifest {path}: {exc}") from exc
     except (ValueError, RecursionError) as exc:  # includes JSONDecodeError and duplicate keys
         raise ManifestError(f"manifest is not valid JSON: {exc}") from exc
     return validate_manifest(data)
