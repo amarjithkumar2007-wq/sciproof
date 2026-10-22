@@ -6,8 +6,13 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+* Numeric comparison (`--output-numeric`) supports tab-separated values (`.tsv`), compared with
+  the declared tolerance like `.csv`.
 * Policy files with a leading UTF-8 BOM are accepted; the original file bytes remain covered by
   the policy SHA-256 digest.
+* `verify --save-json` and `export -o` report an unwritable path as `error: cannot write ...` with
+  exit status 3 instead of a traceback with exit status 1 (which means verification failed).
+  `verify --save-json` now writes the file after the verdict is printed.
 
 ## [0.3.1] - 2026-10-21
 

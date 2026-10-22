@@ -206,3 +206,65 @@ def test_inspect_and_verify_do_not_crash_on_an_unencodable_terminal(project, mon
         )
         assert completed.returncode == 0, completed.stderr
         assert "Traceback" not in completed.stderr
+
+
+def test_verify_save_json_to_a_missing_directory_is_a_clean_error(project, capsys):
+    assert (
+        cli.main(
+            ["capture", "--name", "exp", "--input", "data.json", "--", sys.executable, "-c", "pass"]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    code = cli.main(["verify", "exp.sciproof.json", "--save-json", "nodir/r.json"])
+    captured = capsys.readouterr()
+    assert code == cli.EXIT_ERROR
+    assert "error: cannot write" in captured.err
+    assert "Traceback" not in captured.err
+    assert "PASS" in captured.out  # the verdict is still printed before the error
+
+
+def test_save_json_to_a_read_only_file_is_a_clean_error(project, capsys):
+    target = project.root / "ro.json"
+    target.write_text("{}")
+    target.chmod(0o444)
+    if os.access(target, os.W_OK):  # running as root, or a platform without read-only files
+        return
+    assert (
+        cli.main(
+            ["capture", "--name", "exp", "--input", "data.json", "--", sys.executable, "-c", "pass"]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    code = cli.main(["verify", "exp.sciproof.json", "--save-json", "ro.json"])
+    captured = capsys.readouterr()
+    assert code == cli.EXIT_ERROR
+    assert "Traceback" not in captured.err
+
+
+def test_capture_verify_rerun_with_numeric_tsv(project, capsys):
+    (project.root / "experiment_tsv.py").write_text(
+        "import pathlib\n"
+        "pathlib.Path('out/table.tsv').write_text('metric\\tval\\nloss\\t0.1234567\\n')\n"
+    )
+    (project.root / "out").mkdir(exist_ok=True)
+    (project.root / "out" / "table.tsv").write_text("metric\tval\nloss\t0.1234567\n")
+    args = [
+        "capture",
+        "--name",
+        "exp_tsv",
+        "--output-numeric",
+        "out/table.tsv",
+        "--rtol",
+        "1e-5",
+        "--",
+        sys.executable,
+        "experiment_tsv.py",
+    ]
+    assert cli.main(args) == cli.EXIT_OK
+    capsys.readouterr()
+
+    assert cli.main(["verify", "exp_tsv.sciproof.json", "--rerun", "--yes"]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "RESULT: PASS" in out
