@@ -13,7 +13,7 @@ import pytest
 from sciproof import cli, environment
 from sciproof.diffmanifests import diff_manifests
 from sciproof.environment import MAX_GPUS, hardware_info
-from sciproof.errors import CaptureError, ManifestError
+from sciproof.errors import CaptureError, ManifestError, UsageError
 from sciproof.export import (
     OPENLINEAGE_PRODUCER,
     OPENLINEAGE_SCHEMA_URL,
@@ -402,3 +402,12 @@ def test_an_unknown_export_format_is_refused(project, capsys):
     with pytest.raises(SystemExit):
         cli.main(["export", "exp.sciproof.json", "--format", "spdx"])
     assert "invalid choice" in capsys.readouterr().err
+
+
+def test_an_openlineage_export_with_an_out_of_range_start_is_a_clean_error(project):
+    project.capture()
+    data = json.loads(project.manifest.read_text())
+    data["execution"]["duration_seconds"] = 1e11  # about 3000 years
+    project.manifest.write_text(json.dumps(data))
+    with pytest.raises(UsageError, match="out of range"):
+        to_openlineage(project.manifest)
