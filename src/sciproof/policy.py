@@ -11,6 +11,8 @@ A policy is a small TOML file::
     forbid_dirty_git = true    # ... and the working tree had no uncommitted changes
     require_signature = true   # the manifest is signed (needs --allowed-signers)
     min_claims = 1             # at least one claim is recorded
+    require_note = true        # a note explains the run
+    require_hardware = true    # a hardware record is present
 
     [outputs]
     require_numeric = ["metrics.json"]   # compared with a tolerance, not by exact hash
@@ -58,6 +60,8 @@ _SCHEMA: dict[str, dict[str, str]] = {
         "forbid_dirty_git": "bool",
         "require_signature": "bool",
         "min_claims": "count",
+        "require_note": "bool",
+        "require_hardware": "bool",
     },
     "outputs": {
         "require_numeric": "paths",
@@ -314,6 +318,22 @@ def apply_policy(
             limit=minimum,
             found=count,
         )
+
+    for key, present, label in (
+        ("require_note", manifest.get("note") is not None, "note"),
+        (
+            "require_hardware",
+            manifest["environment"].get("hardware") is not None,
+            "hardware record",
+        ),
+    ):
+        if policy.get("manifest", key):
+            _add(
+                report,
+                "PASS" if present else "FAIL",
+                f"manifest.{key}",
+                f"a {label} was recorded" if present else f"no {label} was recorded",
+            )
 
     outputs = {o["path"]: o for o in manifest["outputs"]}
     for path in policy.get("outputs", "require_numeric") or []:
