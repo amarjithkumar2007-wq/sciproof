@@ -32,6 +32,8 @@ require_git = true
 forbid_dirty_git = true
 require_signature = true
 min_claims = 1
+require_note = true
+require_hardware = true
 
 [outputs]
 require_numeric = ["out/result.json"]
@@ -65,6 +67,8 @@ def _one(report, rule):
 def test_a_full_policy_is_accepted_and_keeps_its_values():
     policy = parse_policy(FULL, file="p.toml")
     assert policy.file == "p.toml" and len(policy.sha256) == 64
+    assert policy.get("manifest", "require_note") is True
+    assert policy.get("manifest", "require_hardware") is True
     assert policy.get("manifest", "max_age_days") == 30
     assert policy.get("outputs", "require_numeric") == ["out/result.json"]
     assert policy.get("rerun", "require") is True
@@ -374,3 +378,62 @@ def test_the_example_policy_in_the_repository_is_valid():
 
 def test_python_is_new_enough_for_tomllib():
     assert sys.version_info >= (3, 11)
+
+
+@pytest.mark.parametrize("rule", ["require_note", "require_hardware"])
+@pytest.mark.parametrize("value", ['"yes"', "1", "0", "[]", "{}"])
+def test_record_requirements_reject_non_booleans(rule, value):
+    with pytest.raises(PolicyError, match="expected true or false"):
+        parse_policy(f"version = 1\n[manifest]\n{rule} = {value}\n")
+
+
+@pytest.mark.parametrize("rule", ["require_note", "require_hardware"])
+@pytest.mark.parametrize("present", [False, True])
+@pytest.mark.parametrize("enabled", [False, True])
+def test_record_requirements_pass_fail_or_are_disabled(
+    project, monkeypatch, rule, present, enabled
+):
+    hardware = {"cpu_count": None, "processor": "", "gpu_probe": "none", "gpus": []}
+    monkeypatch.setattr("sciproof.capture.hardware_info", lambda: hardware)
+    options = {}
+    if present:
+        options = {"note": "baseline run"} if rule == "require_note" else {"record_hardware": True}
+    project.capture(**options)
+    policy = _write(project.root, f"version = 1\n[manifest]\n{rule} = {str(enabled).lower()}\n")
+    report = verify(project.manifest, policy=policy)
+    checks = _checks(report, f"manifest.{rule}")
+    if not enabled:
+        assert not checks
+        assert report.status is Status.PASS
+    else:
+        (check,) = checks
+        expected = Status.PASS if present else Status.FAIL
+        assert check.status is expected
+        assert report.status is expected
+        assert check.evidence["kind"] == "policy"
+        assert check.evidence["rule"] == f"manifest.{rule}"
+
+
+def test_record_requirements_treat_explicit_null_as_absent(project):
+    project.capture()
+    manifest = json.loads(project.manifest.read_text())
+    manifest["note"] = None
+    manifest["environment"]["hardware"] = None
+    project.manifest.write_text(json.dumps(manifest))
+    policy = _write(
+        project.root,
+        "version = 1\n[manifest]\nrequire_note = true\nrequire_hardware = true\n",
+    )
+    report = verify(project.manifest, policy=policy)
+    assert _one(report, "manifest.require_note").status is Status.FAIL
+    assert _one(report, "manifest.require_hardware").status is Status.FAIL
+
+
+@pytest.mark.parametrize("rule", ["require_note", "require_hardware"])
+def test_record_requirements_work_through_the_cli(project, capsys, rule):
+    project.capture()
+    policy = _write(project.root, f"version = 1\n[manifest]\n{rule} = true\n")
+    assert cli.main(["check-policy", str(policy)]) == cli.EXIT_OK
+    assert f"manifest.{rule} = True" in capsys.readouterr().out
+    assert cli.main(["verify", str(project.manifest), "--policy", str(policy)]) == cli.EXIT_FAIL
+    assert f"[FAIL] policy manifest.{rule}" in capsys.readouterr().out
