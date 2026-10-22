@@ -56,6 +56,10 @@ def cli_error_project(tmp_path: Path) -> tuple[Path, Path]:
     (root / "wrong-shape.json").write_text("[]")
     (root / "huge.json").write_text("9" * 5000)
     (root / "directory").mkdir()
+    bad_date = json.loads((root / "valid.sciproof.json").read_text())
+    bad_date["created_at"] = "yesterday"
+    (root / "bad-created-at.json").write_text(json.dumps(bad_date))
+    (root / "max-age.toml").write_text("version = 1\n\n[manifest]\nmax_age_days = 30\n")
     return root, outside
 
 
@@ -102,6 +106,21 @@ def cli_error_project(tmp_path: Path) -> tuple[Path, Path]:
         (
             "verify output directory",
             ["verify", "valid.sciproof.json", "--save-json", "directory"],
+            3,
+        ),
+        (
+            "verify bad created_at",
+            ["verify", "bad-created-at.json"],
+            3,
+        ),
+        (
+            "verify --policy bad created_at",
+            ["verify", "bad-created-at.json", "--policy", "max-age.toml"],
+            3,
+        ),
+        (
+            "export bad created_at",
+            ["export", "bad-created-at.json", "--format", "openlineage"],
             3,
         ),
         ("diff missing manifest", ["diff", "missing.json", "valid.sciproof.json"], 3),
