@@ -25,6 +25,7 @@ from typing import Any
 
 from sciproof import __version__
 from sciproof.claims import claim_text
+from sciproof.errors import UsageError
 from sciproof.manifest import load_manifest
 
 STATEMENT_TYPE = "https://in-toto.io/Statement/v1"
@@ -123,7 +124,14 @@ def to_openlineage(manifest_path: Path | str) -> list[dict[str, Any]]:
     digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
     run_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"sciproof:manifest:{digest}"))
     ended = datetime.fromisoformat(manifest["created_at"])
-    started = ended - timedelta(seconds=manifest["execution"]["duration_seconds"])
+    try:
+        started = ended - timedelta(seconds=manifest["execution"]["duration_seconds"])
+    except OverflowError:
+        raise UsageError(
+            "openlineage: start time out of range (created_at"
+            f" {manifest['created_at']!r} minus duration_seconds"
+            f" {manifest['execution']['duration_seconds']!r})"
+        ) from None
 
     def datasets(items: list[dict[str, Any]], *, only_present: bool) -> list[dict[str, str]]:
         return [
