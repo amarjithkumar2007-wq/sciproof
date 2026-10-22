@@ -29,6 +29,8 @@ require_git = true         # a Git commit was recorded
 forbid_dirty_git = true    # ... and the working tree had no uncommitted changes
 require_signature = true   # the manifest is signed (needs --allowed-signers)
 min_claims = 1             # at least one claim is recorded
+require_note = true        # a note explains the run
+require_hardware = true    # a hardware record is present
 
 [outputs]
 require_numeric = ["metrics.json"]   # compared with a tolerance, not by exact hash
@@ -50,6 +52,8 @@ require_clean_env = true   # ... with a minimal environment (--clean-env)
 | `manifest.forbid_dirty_git` | the tree was clean | it had uncommitted changes | no Git state was recorded |
 | `manifest.require_signature` | the signature is good | the signature is bad | no `--allowed-signers` was given, or it could not be checked |
 | `manifest.min_claims` | at least N claims | fewer | |
+| `manifest.require_note` | a note is recorded | no note is recorded | |
+| `manifest.require_hardware` | a hardware record is present | no hardware record is present | |
 | `outputs.require_numeric` | each listed output is compared with a tolerance | it is exact, or not declared | |
 | `outputs.max_rtol`, `max_atol` | every numeric output is within the ceiling (or there is none) | an output declares a looser tolerance | |
 | `rerun.require` | the command was re-executed | | the verification ran without `--rerun`, or the rerun did not happen |
@@ -58,6 +62,10 @@ require_clean_env = true   # ... with a minimal environment (--clean-env)
 A rule whose evidence is missing is `INCONCLUSIVE`, never a pass: for example a policy that requires
 a signature, verified without `--allowed-signers`, cannot say anything about it. The verdict follows
 the usual rule: any `FAIL` makes the result `FAIL`, otherwise any `INCONCLUSIVE` prevents `PASS`.
+
+For `require_note` and `require_hardware`, absence is known from the manifest and is `FAIL`,
+not `INCONCLUSIVE`. Setting either rule to `false` disables it. A hardware record need not
+include a GPU; the rule checks that the record is present, not that particular hardware exists.
 
 ## Strict by design
 
