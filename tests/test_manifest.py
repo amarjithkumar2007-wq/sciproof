@@ -56,6 +56,8 @@ BAD_MUTATIONS = {
     "negative output size": _set(["outputs", 0, "size"], -1),
     "negative log size": _set(["execution", "stdout", "size"], -1),
     "bad version string": _set(["schema_version"], "one"),
+    "created_at not a timestamp": _set(["created_at"], "yesterday"),
+    "created_at without timezone": _set(["created_at"], "2026-10-22T09:00:00"),
     "missing name": _delete(["name"]),
     "invalid name": _set(["name"], "../evil"),
     "argv not a list": _set(["command", "argv"], "python run.py"),
