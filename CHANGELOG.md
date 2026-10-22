@@ -6,6 +6,9 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+* Policies can require a note (`manifest.require_note`) or a hardware record
+  (`manifest.require_hardware`); missing records fail these checks.
+
 ### Added
 
 * A shell-pipeline tutorial for capturing and verifying non-Python experiments.
