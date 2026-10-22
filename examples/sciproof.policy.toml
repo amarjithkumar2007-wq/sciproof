@@ -10,6 +10,8 @@ require_exit_code = 0    # the recorded run succeeded
 require_git = true       # a Git commit was recorded
 forbid_dirty_git = true  # ... with no uncommitted changes
 min_claims = 1           # at least one claim (--claim) is recorded
+# require_note = true        # capture with --note "why this run matters"
+# require_hardware = true    # capture with --record-hardware
 # require_signature = true   # needs: verify --allowed-signers FILE
 
 [outputs]
