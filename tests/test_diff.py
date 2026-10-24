@@ -126,6 +126,44 @@ def test_environment_variable_changes_are_reported_in_both_directions(project, p
     assert changes["variable OMP_NUM_THREADS"].kind == "added"
 
 
+@pytest.mark.parametrize("field", ["system", "machine", "release"])
+def test_changed_platform_fields_are_reported(project, pair, field):
+    old, new = pair()
+    _edit(old, lambda d: d["environment"]["platform"].update({field: "before"}))
+    _edit(new, lambda d: d["environment"]["platform"].update({field: "after"}))
+
+    report = diff_manifests(old, new)
+    (change,) = _by_section(report, "environment")
+    assert change.kind == "changed"
+    assert change.subject == f"platform {field}"
+    assert "before" in change.message and "after" in change.message
+    assert not report.identical
+
+
+@pytest.mark.parametrize(
+    ("old_vars", "new_vars", "kind"),
+    [
+        ({}, {"OMP_NUM_THREADS": "4"}, "added"),
+        ({"OMP_NUM_THREADS": "2"}, {"OMP_NUM_THREADS": "4"}, "changed"),
+    ],
+)
+def test_added_and_changed_environment_variable_values_are_reported(
+    project, pair, old_vars, new_vars, kind
+):
+    old, new = pair()
+    _edit(old, lambda d: d["environment"].update(env_vars=old_vars))
+    _edit(new, lambda d: d["environment"].update(env_vars=new_vars))
+
+    report = diff_manifests(old, new)
+    (change,) = _by_section(report, "environment")
+    assert change.kind == kind
+    assert change.subject == "variable OMP_NUM_THREADS"
+    assert "4" in change.message
+    if kind == "changed":
+        assert "2" in change.message
+    assert not report.identical
+
+
 def test_package_and_python_differences(project, pair):
     old, new = pair()
 
