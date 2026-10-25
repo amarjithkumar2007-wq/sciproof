@@ -236,6 +236,31 @@ def test_a_file_that_became_a_directory(project, tmp_path):
     assert "results" in removed
 
 
+@pytest.mark.parametrize("section", ["inputs", "outputs"])
+def test_a_file_replaced_by_a_directory_is_reported(project, section):
+    artifact = project.root / "artifact"
+    artifact.write_text("before")
+    options = {
+        "argv": [sys.executable, "-c", "pass"],
+        "inputs": [],
+        "outputs": [],
+        "numeric_outputs": [],
+        section: ["artifact"],
+    }
+    first = project.capture(name="a", **options)
+    artifact.unlink()
+    artifact.mkdir()
+    (artifact / "result.txt").write_text("after")
+    second = project.capture(name="b", **options)
+
+    report = diff_manifests(first.manifest_path, second.manifest_path)
+    (change,) = _by_section(report, section)
+    assert change.subject == "artifact"
+    assert change.kind == "changed"
+    assert "was a file" in change.message and "is now a directory" in change.message
+    assert not report.identical
+
+
 def test_directory_trees_are_compared_by_file(project):
     (project.root / "inputs").mkdir()
     (project.root / "inputs" / "x.csv").write_text("1")
@@ -314,6 +339,20 @@ def test_long_sections_are_cut_in_text_but_complete_in_json(project, pair):
     report = diff_manifests(old, new)
     assert "... and" in report.to_text()
     assert len(report.to_dict()["changes"]) >= len(packages)
+
+
+def test_markdown_caps_long_sections_and_reports_the_omitted_count(project, pair):
+    old, new = pair()
+    packages = [{"name": f"pkg{i:03}", "version": "1"} for i in range(MAX_LINES_PER_SECTION + 5)]
+    _edit(old, lambda d: d.update(dependencies=[]))
+    _edit(new, lambda d: d.update(dependencies=packages))
+
+    report = diff_manifests(old, new)
+    text = report.to_markdown()
+    assert f"package pkg{MAX_LINES_PER_SECTION - 1:03}" in text
+    assert f"package pkg{MAX_LINES_PER_SECTION:03}" not in text
+    assert "... and 5 more" in text
+    assert len(_by_section(report, "environment")) == len(packages)
 
 
 # ---------------------------------------------------------------- command line and API
