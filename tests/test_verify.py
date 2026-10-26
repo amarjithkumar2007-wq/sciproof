@@ -137,6 +137,68 @@ def test_rerun_of_a_deterministic_experiment_passes(project):
     assert not [w for w in report.warnings if "environment differs" in w]
 
 
+@pytest.mark.parametrize("created", [False, True])
+def test_rerun_checks_an_output_recorded_as_absent(project, created):
+    project.capture(
+        argv=[sys.executable, "-c", "raise SystemExit(1)"],
+        outputs=["never.txt"],
+        numeric_outputs=[],
+    )
+    _edit_manifest(
+        project,
+        lambda m: m["command"].update(
+            argv=[
+                sys.executable,
+                "-c",
+                "from pathlib import Path; "
+                + ("Path('never.txt').write_text('created'); " if created else "")
+                + "raise SystemExit(1)",
+            ]
+        ),
+    )
+
+    report = verify(project.manifest, rerun=True, assume_yes=True)
+    (check,) = [c for c in report.checks if c.subject == "rerun output never.txt"]
+    assert check.status is (Status.FAIL if created else Status.PASS)
+    assert ("rerun created it" if created else "absent, as recorded") in check.message
+    assert report.status is (Status.FAIL if created else Status.PASS)
+    assert not (project.root / "never.txt").exists()
+
+
+@pytest.mark.parametrize("tampered", [False, True])
+def test_rerun_cannot_compare_an_unusable_numeric_snapshot(project, tampered):
+    project.capture()
+    data = json.loads(project.manifest.read_text())
+    item = next(o for o in data["outputs"] if o["path"] == "out/result.json")
+    snapshot = project.root / item["compare"]["snapshot"]["path"]
+    if tampered:
+        snapshot.write_text('{"value": 0, "label": "ok"}')
+    else:
+        snapshot.unlink()
+
+    report = verify(project.manifest, rerun=True, assume_yes=True)
+    (check,) = [c for c in report.checks if c.subject == "rerun output out/result.json"]
+    assert check.status is Status.INCONCLUSIVE
+    assert "recorded copy is unusable" in check.message
+    assert "cannot compare numerically" in check.message
+    assert report.status is (Status.FAIL if tampered else Status.INCONCLUSIVE)
+    assert project.runs() == 2
+
+
+def test_rerun_with_unparsable_numeric_output_fails_without_crashing(project):
+    project.capture()
+    original = (project.root / "out/result.json").read_bytes()
+    code = "from pathlib import Path; Path('out/result.json').write_text('{')"
+    _edit_manifest(project, lambda m: m["command"].update(argv=[sys.executable, "-c", code]))
+
+    report = verify(project.manifest, rerun=True, assume_yes=True)
+    (check,) = [c for c in report.checks if c.subject == "rerun output out/result.json"]
+    assert check.status is Status.FAIL
+    assert "cannot be compared numerically" in check.message
+    assert report.status is Status.FAIL
+    assert (project.root / "out/result.json").read_bytes() == original
+
+
 def test_rerun_leaves_the_recorded_outputs_untouched(project, monkeypatch):
     project.capture()
     original = (project.root / "out" / "exact.txt").read_bytes()
