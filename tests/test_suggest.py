@@ -6,6 +6,7 @@ import pytest
 
 from sciproof import cli
 from sciproof.capture import capture
+from sciproof.errors import CaptureError
 from sciproof.suggest import suggest_inputs
 from sciproof.verify import Status, verify
 
@@ -137,3 +138,24 @@ def test_a_file_name_with_a_line_break_cannot_corrupt_the_log(tmp_path):
     (tmp_path / "run.py").write_text(f"open({weird!r}).read()\n")
     found = suggest_inputs([sys.executable, "run.py"], tmp_path, ["run.py"])
     assert found.inside == [weird]
+
+
+def test_files_read_outside_the_workspace_are_reported_as_outside(tmp_path):
+    """Undeclared reads split into ``inside`` and ``outside``; here only ``outside`` applies."""
+    outside_dir = tmp_path.parent / (tmp_path.name + "-outside")
+    outside_dir.mkdir()
+    ext_file = outside_dir / "external_data.txt"
+    ext_file.write_text("sample")
+
+    (tmp_path / "run.py").write_text(f"open({str(ext_file)!r}).read()\n")
+    found = suggest_inputs([sys.executable, "run.py"], tmp_path, ["run.py"])
+    assert found.exit_code == 0
+    assert found.outside == [str(ext_file.resolve())]
+    assert found.inside == []
+
+
+def test_a_timed_out_run_raises_capture_error_instead_of_reporting_nothing(tmp_path):
+    """A command killed by the timeout leaves no trustworthy audit log: fail, don't guess."""
+    (tmp_path / "hang.py").write_text("import time; time.sleep(10)\n")
+    with pytest.raises(CaptureError, match="nothing was recorded"):
+        suggest_inputs([sys.executable, "hang.py"], tmp_path, ["hang.py"], timeout=0.2)
