@@ -159,3 +159,37 @@ def test_a_timed_out_run_raises_capture_error_instead_of_reporting_nothing(tmp_p
     (tmp_path / "hang.py").write_text("import time; time.sleep(10)\n")
     with pytest.raises(CaptureError, match="nothing was recorded"):
         suggest_inputs([sys.executable, "hang.py"], tmp_path, ["hang.py"], timeout=0.2)
+
+
+def test_a_cached_pyc_read_is_reported_as_its_python_source(tmp_path):
+    """An import served from ``__pycache__`` still points at the source the run depends on."""
+    import py_compile
+
+    (tmp_path / "helper_mod.py").write_text("VALUE = 1\n")
+    py_compile.compile(str(tmp_path / "helper_mod.py"), doraise=True)
+
+    (tmp_path / "run.py").write_text("import helper_mod\n")
+    found = suggest_inputs([sys.executable, "run.py"], tmp_path, ["run.py"])
+    assert found.exit_code == 0
+    assert found.inside == ["helper_mod.py"]
+
+
+def test_a_command_that_cannot_be_started_raises_capture_error(tmp_path):
+    """A missing executable must surface as CaptureError, not a traceback or empty report."""
+    missing = tmp_path / "no-such-executable"
+    with pytest.raises(CaptureError):
+        suggest_inputs([str(missing)], tmp_path, [])
+
+
+@pytest.mark.parametrize("ignored_dir", [".venv", "site-packages"])
+def test_files_inside_virtualenvs_and_site_packages_are_never_suggested(tmp_path, ignored_dir):
+    """Reads under ``.venv``/``site-packages`` are environment noise, not undeclared inputs."""
+    noise_dir = tmp_path / ignored_dir / "lib"
+    noise_dir.mkdir(parents=True)
+    (noise_dir / "data.txt").write_text("x")
+
+    (tmp_path / "run.py").write_text(f"open({str(noise_dir / 'data.txt')!r}).read()\n")
+    found = suggest_inputs([sys.executable, "run.py"], tmp_path, ["run.py"])
+    assert found.exit_code == 0
+    assert found.inside == []
+    assert found.outside == []
