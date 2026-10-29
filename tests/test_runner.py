@@ -106,10 +106,44 @@ windows_tree = pytest.mark.skipif(
 )
 
 
+def _pid_exists_posix(pid):
+    import os as _os
+
+    try:
+        _os.kill(pid, 0)  # signal 0 only probes; a killed-but-unreaped zombie still answers
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def _pid_exists_windows(pid):
+    import subprocess
+
+    probe = subprocess.run(
+        ["tasklist", "/FI", f"PID eq {pid}"], capture_output=True, text=True, check=False
+    )
+    return "No tasks" not in probe.stdout
+
+
+def _wait_until_gone(pid, pid_exists, timeout=10.0):
+    """Wait out the asynchronous part of process death (signal delivery, reaping).
+
+    A child that truly survived the kill sleeps for 60 seconds, so a bounded poll
+    still fails fast against the bug of #34 while tolerating slow CI runners.
+    """
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not pid_exists(pid):
+            return
+        time.sleep(0.05)
+    raise AssertionError(f"process {pid} survived the timeout kill")
+
+
 @posix_only
 def test_a_timed_out_command_kills_its_whole_process_tree(tmp_path):
     """The child a command started must not survive the timeout (the bug of #34)."""
-    import signal
     import time
 
     pid_file = tmp_path / "child.pid"
@@ -117,17 +151,12 @@ def test_a_timed_out_command_kills_its_whole_process_tree(tmp_path):
     with pytest.raises(CommandTimeout):
         run_command([sys.executable, "-c", _TREE_SCRIPT, str(pid_file)], tmp_path, timeout=1)
     assert time.monotonic() - started < 30  # nowhere near the 60s the tree asked for
-    child_pid = int(pid_file.read_text())
-    with pytest.raises(ProcessLookupError):
-        os.kill(child_pid, 0)  # signal 0 only probes: the child must be gone
-    with pytest.raises(ProcessLookupError):  # belt and braces: it really is dead
-        os.kill(child_pid, signal.SIGKILL)
+    _wait_until_gone(int(pid_file.read_text()), _pid_exists_posix)
 
 
 @windows_tree
 def test_a_timed_out_command_kills_its_whole_process_tree_on_windows(tmp_path):
     """taskkill /T must take down the child along with the timed-out command."""
-    import subprocess
     import time
 
     pid_file = tmp_path / "child.pid"
@@ -135,11 +164,7 @@ def test_a_timed_out_command_kills_its_whole_process_tree_on_windows(tmp_path):
     with pytest.raises(CommandTimeout):
         run_command([sys.executable, "-c", _TREE_SCRIPT, str(pid_file)], tmp_path, timeout=1)
     assert time.monotonic() - started < 30
-    child_pid = int(pid_file.read_text())
-    probe = subprocess.run(
-        ["tasklist", "/FI", f"PID eq {child_pid}"], capture_output=True, text=True, check=False
-    )
-    assert "No tasks" in probe.stdout
+    _wait_until_gone(int(pid_file.read_text()), _pid_exists_windows)
 
 
 @posix_only
