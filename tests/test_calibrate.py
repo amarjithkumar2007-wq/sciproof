@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 
 import pytest
@@ -241,3 +242,60 @@ def test_json_confirmation_prompt_stays_on_stderr(noisy, capsys, monkeypatch):
     captured = capsys.readouterr()
     assert json.loads(captured.out)["result"] == "STABLE"
     assert "EXECUTE" in captured.err and "noisy.py" in captured.err
+
+
+# ---------------------------------------------------------------- edge cases
+
+
+def test_a_numeric_output_absent_during_runs_is_reported(noisy):
+    """A run that never produces its declared numeric output is variation, not a crash."""
+    project = noisy()
+    (project.root / "noisy.py").write_text("pass\n")  # the runs produce nothing at all
+    report = calibrate(project.manifest, runs=2, assume_yes=True)
+    numeric = next(o for o in report.outputs if o.path == "out/m.json")
+    assert not numeric.ok and "absent in some runs" in numeric.message
+
+
+def test_an_unparseable_numeric_output_is_reported_without_crashing(noisy):
+    """Garbage in a numeric output is reported, not raised."""
+    project = noisy()
+    (project.root / "noisy.py").write_text(
+        "import os, pathlib\n"
+        "os.makedirs('out', exist_ok=True)\n"
+        "pathlib.Path('out/m.json').write_text('not json at all')\n"
+        "pathlib.Path('out/e.txt').write_text('same')\n"
+    )
+    report = calibrate(project.manifest, runs=2, assume_yes=True)
+    numeric = next(o for o in report.outputs if o.path == "out/m.json")
+    assert not numeric.ok and "cannot be read:" in numeric.message
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="os.mkfifo is POSIX-only")
+def test_a_directory_tree_that_cannot_be_hashed_fingerprints_as_none(tmp_path):
+    """An unhashable tree (here a named pipe) must not crash the fingerprint."""
+    from sciproof.calibrate import _fingerprint
+
+    os.mkfifo(tmp_path / "pipe")  # neither a regular file nor a directory: TreeError
+    assert _fingerprint(tmp_path, directory=True) is None
+
+
+def test_a_location_missing_from_some_runs_is_flagged():
+    from sciproof.calibrate import _spread
+
+    samples = [[("loss", 1.0), ("extra", 2.0)], [("loss", 1.0)]]
+    _, _, _, problem = _spread(samples, 1e-3, 0.0)
+    assert problem == "extra is not present in every run"
+
+
+def test_a_location_nan_in_some_runs_only_is_flagged():
+    from sciproof.calibrate import _spread
+
+    _, _, _, problem = _spread([[("x", float("nan"))], [("x", 1.0)]], 1e-3, 0.0)
+    assert problem == "x is NaN in some runs only"
+
+
+def test_a_location_infinite_in_some_runs_only_is_flagged():
+    from sciproof.calibrate import _spread
+
+    _, _, _, problem = _spread([[("x", float("inf"))], [("x", 100.0)]], 1e-3, 0.0)
+    assert problem == "x is infinite in some runs only"
